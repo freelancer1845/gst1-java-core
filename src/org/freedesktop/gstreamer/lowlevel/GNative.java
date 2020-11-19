@@ -21,7 +21,9 @@ package org.freedesktop.gstreamer.lowlevel;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
@@ -32,24 +34,31 @@ import com.sun.jna.Platform;
  *
  */
 public final class GNative {
-    // gstreamer on win32 names the dll files one of foo.dll, libfoo.dll and libfoo-0.dll
+    // gstreamer on win32 names the dll files one of foo.dll, libfoo.dll and
+    // libfoo-0.dll
     // private static String[] windowsNameFormats = { "%s", "lib%s", "lib%s-0" };
-            
+
     private final static String[] nameFormats;
-    
+
     static {
         String defFormats = "%s";
         if (Platform.isWindows()) {
-            defFormats = "%s|lib%s|lib%s-0";
+            defFormats = "%s|%s-0|lib%s|lib%s-0";
         } else if (Platform.isMac()) {
             defFormats = "%s.0|%s";
         }
         nameFormats = System.getProperty("gstreamer.GNative.nameFormats", defFormats).split("\\|");
     }
 
-    private GNative() {}
+    private GNative() {
+    }
 
-    public static synchronized <T extends Library> T loadLibrary(String name, Class<T> interfaceClass, Map<String, ?> options) {
+    public static Stream<String> libFormats(String libraryName) {
+        return Arrays.stream(nameFormats).map(format -> String.format(format, libraryName));
+    }
+
+    public static synchronized <T extends Library> T loadLibrary(String name, Class<T> interfaceClass,
+            Map<String, ?> options) {
         for (String format : nameFormats)
             try {
                 return loadNativeLibrary(String.format(format, name), interfaceClass, options);
@@ -59,11 +68,11 @@ public final class GNative {
         throw new UnsatisfiedLinkError("Could not load library: " + name);
     }
 
-    private static <T extends Library> T loadNativeLibrary(String name, Class<T> interfaceClass, Map<String, ?> options) {
+    private static <T extends Library> T loadNativeLibrary(String name, Class<T> interfaceClass,
+            Map<String, ?> options) {
         T library = interfaceClass.cast(Native.loadLibrary(name, interfaceClass, options));
         boolean needCustom = false;
-    search:
-        for (Method m : interfaceClass.getMethods())
+        search: for (Method m : interfaceClass.getMethods())
             for (Class<?> cls : m.getParameterTypes())
                 if (cls.isArray() && getConverter(cls.getComponentType()) != null) {
                     needCustom = true;
@@ -71,11 +80,10 @@ public final class GNative {
                 }
         if (!needCustom)
             return library;
-//        System.out.println("Using custom library proxy for " + interfaceClass.getName());
-        return interfaceClass.cast(
-        		Proxy.newProxyInstance(interfaceClass.getClassLoader(),
-        				new Class[]{ interfaceClass }, 
-        				new Handler<T>(library, options)));
+        // System.out.println("Using custom library proxy for " +
+        // interfaceClass.getName());
+        return interfaceClass.cast(Proxy.newProxyInstance(interfaceClass.getClassLoader(),
+                new Class[] { interfaceClass }, new Handler<T>(library, options)));
     }
 
     public static synchronized NativeLibrary getNativeLibrary(String name) {
@@ -90,7 +98,9 @@ public final class GNative {
 
     private static interface Converter {
         Class<?> nativeType();
+
         Object toNative(Object value);
+
         Object fromNative(Object value, Class<?> javaType);
     }
 
@@ -103,7 +113,7 @@ public final class GNative {
             return value != null ? EnumMapper.getInstance().intValue((Enum<?>) value) : 0;
         }
 
-        @SuppressWarnings({"unchecked","rawtypes"})
+        @SuppressWarnings({ "unchecked", "rawtypes" })
         public Object fromNative(Object value, Class javaType) {
             return EnumMapper.getInstance().valueOf((Integer) value, javaType);
         }
@@ -117,13 +127,12 @@ public final class GNative {
         public Object toNative(Object value) {
             return value != null ? Boolean.TRUE.equals(value) ? 1 : 0 : 0;
         }
-        
+
         @SuppressWarnings("rawtypes")
         public Object fromNative(Object value, Class javaType) {
             return value != null ? ((Integer) value).intValue() != 0 : 0;
         }
     };
-
 
     private static Converter getConverter(Class<?> javaType) {
         if (Enum.class.isAssignableFrom(javaType))
@@ -137,12 +146,12 @@ public final class GNative {
         private final InvocationHandler proxy;
         @SuppressWarnings("unused") // Keep a reference to stop underlying Library being GC'd
         private final T library;
-        
+
         public Handler(T library, Map<String, ?> options) {
             this.library = library;
             this.proxy = Proxy.getInvocationHandler(library);
         }
-        
+
         @SuppressWarnings("null")
         public Object invoke(Object self, Method method, Object[] args) throws Throwable {
             int lastArg = args != null ? args.length : 0;
@@ -182,7 +191,7 @@ public final class GNative {
                 postInvoke[i].run();
             return retval;
         }
-        
+
         @SuppressWarnings("unused")
         Class<?> getNativeClass(Class<?> cls) {
             if (cls == Integer.class)
@@ -194,6 +203,7 @@ public final class GNative {
 
         private static interface ArrayIO {
             public void set(Object array, int index, Object data);
+
             public Object get(Object array, int index);
         }
 
@@ -201,6 +211,7 @@ public final class GNative {
             public void set(Object array, int index, Object data) {
                 java.lang.reflect.Array.setInt(array, index, data != null ? (Integer) data : 0);
             }
+
             public Object get(Object array, int index) {
                 return java.lang.reflect.Array.getInt(array, index);
             }
@@ -210,6 +221,7 @@ public final class GNative {
             public void set(Object array, int index, Object data) {
                 java.lang.reflect.Array.setLong(array, index, data != null ? (Long) data : 0);
             }
+
             public Object get(Object array, int index) {
                 return java.lang.reflect.Array.getLong(array, index);
             }
